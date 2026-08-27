@@ -1212,6 +1212,30 @@ export default function OrdersManager({ orders }) {
     });
   }, [orders, search, pipelineTab]);
 
+  // Stripe collected a phone at checkout long before we had a column for it, so
+  // orders paid before migration 0037 have a blank Phone cell. This pulls them
+  // back off the Stripe session. Read-only against Stripe and it only ever fills
+  // a blank, so pressing it twice is harmless.
+  const backfillPhones = useMutation({
+    mutationFn: () => base44.functions.invoke("backfillOrderPhones"),
+    onSuccess: (res) => {
+      const d = res?.data || {};
+      queryClient.invalidateQueries({ queryKey: ["orders"] });
+      const failed = (d.failures || []).length;
+      toast({
+        title: d.updated ? `Added ${d.updated} phone number${d.updated === 1 ? "" : "s"}` : "No new phone numbers found",
+        description: [
+          `${d.examined ?? 0} order${d.examined === 1 ? "" : "s"} checked`,
+          d.no_phone_on_session ? `${d.no_phone_on_session} had none on file` : "",
+          failed ? `${failed} could not be read` : "",
+        ].filter(Boolean).join(" · "),
+      });
+    },
+    onError: (error) => {
+      toast({ title: "Could not fetch phone numbers", description: error.message, variant: "destructive" });
+    },
+  });
+
   const exportCsv = () => {
     // The delivery address is the whole point of exporting orders for a postage
     // run, but it was missing entirely — admins had to open every order by hand.
@@ -1259,15 +1283,28 @@ export default function OrdersManager({ orders }) {
               <p className="text-[9px] font-mono text-muted-foreground/40">{orders.length} total · {filtered.length} showing</p>
             </div>
           </div>
-          <Button
-            variant="outline"
-            onClick={exportCsv}
-            disabled={!filtered.length}
-            size="mobile"
-            className="rounded-none border-border/30 text-[9px] font-bold uppercase tracking-wider"
-          >
-            <Download className="mr-1.5 h-3 w-3" /> Export CSV
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => backfillPhones.mutate()}
+              disabled={backfillPhones.isPending}
+              size="mobile"
+              title="Fetch missing customer phone numbers from Stripe"
+              className="rounded-none border-border/30 text-[9px] font-bold uppercase tracking-wider"
+            >
+              <Phone className="mr-1.5 h-3 w-3" />
+              {backfillPhones.isPending ? "Fetching…" : "Get phone numbers"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={exportCsv}
+              disabled={!filtered.length}
+              size="mobile"
+              className="rounded-none border-border/30 text-[9px] font-bold uppercase tracking-wider"
+            >
+              <Download className="mr-1.5 h-3 w-3" /> Export CSV
+            </Button>
+          </div>
         </div>
 
         {/* Event-day collection desk */}
