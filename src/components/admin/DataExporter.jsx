@@ -70,6 +70,7 @@ const REGISTRATION_COLUMNS = [
 const ORDER_COLUMNS = [
   { key: "id", label: "ID" },
   { key: "customer_email", label: "Customer Email" },
+  { key: "customer_phone", label: "Customer Phone" },
   { key: "status", label: "Status" },
   { key: "total_aud", label: "Total (AUD)" },
   { key: "created_date", label: "Created Date" },

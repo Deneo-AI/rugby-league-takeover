@@ -7,6 +7,7 @@ import {
   ChevronDown, Package, CreditCard, Truck, XCircle, CheckCircle2, RotateCcw,
   User, Copy, ExternalLink, MapPin, Info, AlertTriangle, CalendarDays,
   Pencil, Printer, Ban,
+  Phone,
 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { downloadCsv } from "@/lib/csv";
@@ -102,6 +103,14 @@ function orderAddressText(order) {
   if (lines.length > 1) return lines.join("\n");
   return order.shipping_address || "";
 }
+/* The contact number for this order — captured from Stripe Checkout at payment
+   time (migration 0037). Orders paid before that column existed are backfilled
+   server-side (from the Stripe session, or from the customer's travel enquiry /
+   profile where they gave us one), so this stays a single field read. */
+function orderPhone(order) {
+  return String(order.customer_phone || "").trim();
+}
+
 function safeTrackingUrl(value) {
   if (!value) return "";
   try {
@@ -601,7 +610,8 @@ function OrderCard({ order, onUpdate, index, actorEmail }) {
 
   const copyOrderSummary = async () => {
     const items = lineItems.map((i) => `${i.quantity}x ${i.name}`).join(", ");
-    const summary = `Order #${String(order.id || "").slice(-6).toUpperCase()}\n${order.customer_name || "Customer"}\n${order.customer_email || ""}\n${order.shipping_address || ""}\nItems: ${items}\nTotal: $${Number(order.total_aud || 0).toFixed(2)} AUD`;
+    const phoneLine = orderPhone(order) ? `\n${orderPhone(order)}` : "";
+    const summary = `Order #${String(order.id || "").slice(-6).toUpperCase()}\n${order.customer_name || "Customer"}\n${order.customer_email || ""}${phoneLine}\n${order.shipping_address || ""}\nItems: ${items}\nTotal: $${Number(order.total_aud || 0).toFixed(2)} AUD`;
     try {
       await navigator.clipboard.writeText(summary);
       toast({ title: "Copied", description: "Order summary copied to clipboard." });
@@ -664,6 +674,16 @@ function OrderCard({ order, onUpdate, index, actorEmail }) {
                 <User className="h-2.5 w-2.5" />
                 {order.customer_email || "—"}
               </span>
+              {orderPhone(order) && (
+                <a
+                  href={`tel:${orderPhone(order).replace(/[^\d+]/g, "")}`}
+                  className="flex items-center gap-1 hover:text-primary transition-colors"
+                  title="Call this customer"
+                >
+                  <Phone className="h-2.5 w-2.5" />
+                  {orderPhone(order)}
+                </a>
+              )}
               <span className="flex items-center gap-1">
                 <Package className="h-2.5 w-2.5" />
                 {lineItems.length} {lineItems.length === 1 ? "item" : "items"}
@@ -1198,14 +1218,14 @@ export default function OrdersManager({ orders }) {
     // Split into per-field columns (so the sheet can feed a carrier upload or a
     // mail merge) plus one combined column for quick copy/paste.
     const headers = [
-      "Date", "Order", "Customer", "Email", "Account", "Status", "Total AUD", "Items",
+      "Date", "Order", "Customer", "Email", "Phone", "Account", "Status", "Total AUD", "Items",
       "Fulfilment", "Ship To Name", "Address 1", "Address 2", "Suburb", "State", "Postcode", "Country",
       "Shipping Address", "Carrier", "Tracking", "Notes",
     ];
     const rows = filtered.map((o) => [
       o.created_date ? format(new Date(o.created_date), "yyyy-MM-dd") : "",
       String(o.id || "").slice(-6).toUpperCase(),
-      o.customer_name, o.customer_email, o.user_email || "guest", o.status || "pending",
+      o.customer_name, o.customer_email, orderPhone(o), o.user_email || "guest", o.status || "pending",
       Number(o.total_aud || 0).toFixed(2),
       (o.line_items || []).map((i) => `${i.quantity}x ${i.name}${i.size ? ` (${i.size})` : ""}`).join("; "),
       o.fulfilment_method || "",

@@ -144,6 +144,23 @@ async function processPaidCheckout(svc: any, event: Stripe.Event, session: Strip
     p_paid_at: new Date(event.created * 1000).toISOString(),
   });
   if (processError) throw processError;
+
+  // Stripe collects a phone at checkout (createCheckout sets
+  // phone_number_collection), but only the email and name were ever copied off
+  // customer_details — so the orders export had a delivery address and no way
+  // to ring the customer about it. Written separately from the payment RPC on
+  // purpose: a contact detail must never be able to fail a payment.
+  const customerPhone = String(
+    session.customer_details?.phone || shipping?.phone || ''
+  ).trim().slice(0, 40);
+  if (customerPhone) {
+    const { error: phoneError } = await svc
+      .from('store_orders')
+      .update({ customer_phone: customerPhone })
+      .eq('id', order.id);
+    if (phoneError) console.error('customer_phone update failed:', phoneError);
+  }
+
   if (result?.result === 'processed') {
     const { data: paidOrder } = await svc.from('store_orders').select('*').eq('id', order.id).single();
     if (paidOrder) await sendOrderConfirmation(paidOrder);
