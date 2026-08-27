@@ -1335,7 +1335,7 @@ export default function Forum() {
         <div className="absolute inset-0 bg-gradient-to-b from-primary/[0.04] via-transparent to-background" />
         <FloatingParticles />
 
-        <div className="relative z-10 mx-auto max-w-6xl px-3 pb-4 pt-[calc(4.5rem+env(safe-area-inset-top,0px))] sm:px-5 sm:pb-10 sm:pt-[calc(8rem+env(safe-area-inset-top,0px))] md:px-8 md:pt-[calc(8.5rem+env(safe-area-inset-top,0px))] md:pb-12">
+        <div className="relative z-10 mx-auto max-w-6xl px-3 pb-4 pt-[calc(6.5rem+env(safe-area-inset-top,0px))] sm:px-5 sm:pb-10 sm:pt-[calc(8rem+env(safe-area-inset-top,0px))] md:px-8 md:pt-[calc(8.5rem+env(safe-area-inset-top,0px))] md:pb-12">
           {/* Breadcrumb */}
           <motion.nav initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="mb-5 hidden items-center gap-2 sm:flex">
             <Link to="/" className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground/30 hover:text-primary transition-colors">Home</Link>
