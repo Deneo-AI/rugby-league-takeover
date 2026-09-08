@@ -22,8 +22,8 @@
     "ios:run": "cap run ios"
   },
   "dependencies": {
-    "@base44/sdk": "^0.8.41",
-    "@base44/vite-plugin": "^1.0.30",
+    "@base44/sdk": "^0.8.48",
+    "@base44/vite-plugin": "^1.0.35",
     "@capacitor/app": "^8.1.0",
     "@capacitor/app-launcher": "^8.0.1",
     "@capacitor/browser": "^8.0.3",
