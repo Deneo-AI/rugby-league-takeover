@@ -1,0 +1,37 @@
+{
+  "name": "Product Release Notifications",
+  "description": "Email and notify subscribers when a coming soon merch product is released.",
+  "trigger": {
+    "condition": "${ ((.trigger.changed_fields | index(\"coming_soon\") != null) and (.trigger.data.coming_soon == false) and (.trigger.old_data.coming_soon == true) and (.trigger.data.is_active != false)) }",
+    "config": {
+      "trigger_type": "entity",
+      "events": [
+        "update"
+      ],
+      "entity_name": "Product"
+    }
+  },
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "product_release_notifications",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "run_function": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "notifyProductRelease",
+            "args": {}
+          },
+          "then": "end"
+        }
+      }
+    ]
+  },
+  "x-base44-migrated-from-automation": {
+    "legacy_payload_function": "notifyProductRelease"
+  }
+}
