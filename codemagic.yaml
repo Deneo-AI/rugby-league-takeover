@@ -45,17 +45,15 @@ workflows:
         script: npm run lint && npm run typecheck && npm test
       - name: Build web assets and sync into the iOS shell
         script: npm run build && npx cap sync ios
-      # Shared-certificate signing. --certificate-key points at the account-wide
-      # distribution key; --create only mints a certificate if none matches that
-      # key, so after the first app creates it, every app reuses the same one.
+      # Fetch only existing signing files matching the shared distribution key.
+      # Missing matching certificates or App Store profiles fail the build.
       - name: Set up code signing
         script: |
           set -e
           keychain initialize
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
-            --certificate-key @env:CERTIFICATE_PRIVATE_KEY \
-            --create
+            --certificate-key @env:CERTIFICATE_PRIVATE_KEY
           keychain add-certificates
           xcode-project use-profiles
       # App Store Connect rejects a re-used CFBundleVersion ("must be higher than
