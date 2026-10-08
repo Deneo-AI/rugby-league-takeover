@@ -21,7 +21,9 @@ alter table public.site_settings
 drop view if exists public.site_settings_view;
 
 -- Postgres forbids a subquery directly in an ALTER ... USING transform, so the
--- array→text conversion is wrapped in a temporary function.
+-- array→text conversion is wrapped in temporary overloads. Production may have
+-- jsonb because of historical drift, while clean preview databases already have
+-- text; supporting both makes the migration replay-safe without losing content.
 create or replace function public._ticker_jsonb_to_text(v jsonb)
   returns text language sql immutable as $$
   select case
@@ -33,11 +35,17 @@ create or replace function public._ticker_jsonb_to_text(v jsonb)
   end
 $$;
 
+create or replace function public._ticker_jsonb_to_text(v text)
+  returns text language sql immutable as $$
+  select v
+$$;
+
 alter table public.site_settings
   alter column ticker_items type text
   using public._ticker_jsonb_to_text(ticker_items);
 
 drop function public._ticker_jsonb_to_text(jsonb);
+drop function public._ticker_jsonb_to_text(text);
 
 -- Recreate the sanitising public read view exactly as before (masks the
 -- shipping sender address / creator columns for non-admins).

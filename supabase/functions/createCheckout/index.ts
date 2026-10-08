@@ -359,6 +359,12 @@ function freeShippingThresholdCents(settings: any) {
 function shippingModeOf(settings: any) {
   return settings?.shipping_mode === 'fixed' ? 'fixed' : 'calculated';
 }
+function shippingServiceEnabled(selection: ShippingSelection, settings: any) {
+  const express = /EXPRESS/i.test(selection.code);
+  return express
+    ? settings?.shipping_express_enabled !== false
+    : settings?.shipping_standard_enabled !== false;
+}
 const FLAT_RATE_CAP_AUD = 1000; // guardrail against a fat-fingered postage value
 function clampFlatRateCents(value: unknown, fallbackAud: number) {
   const n = Number(value);
@@ -541,7 +547,7 @@ Deno.serve(async (req) => {
     );
     const { data: settings, error: settingsError } = await svc
       .from('site_settings')
-      .select('pickup_enabled,pickup_audience,pickup_label,pickup_instructions,gst_enabled,gst_rate_percent,gst_mode,gst_label,card_fee_enabled,card_fee_percent,card_fee_fixed_aud,card_fee_mode,card_fee_label,free_shipping_threshold_aud,shipping_mode,shipping_flat_single_aud,shipping_flat_multi_aud')
+      .select('pickup_enabled,pickup_audience,pickup_label,pickup_instructions,gst_enabled,gst_rate_percent,gst_mode,gst_label,card_fee_enabled,card_fee_percent,card_fee_fixed_aud,card_fee_mode,card_fee_label,free_shipping_threshold_aud,shipping_mode,shipping_flat_single_aud,shipping_flat_multi_aud,shipping_standard_enabled,shipping_express_enabled')
       .order('updated_date', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -557,6 +563,17 @@ Deno.serve(async (req) => {
       shippingMode,
     );
     if ('error' in fulfilment) return responseJson(req, { error: fulfilment.error }, 400);
+    if (
+      shippingMode === 'calculated'
+      && fulfilment.method === 'shipping'
+      && fulfilment.shipping
+      && !shippingServiceEnabled(fulfilment.shipping, settings || {})
+    ) {
+      const disabledService = /EXPRESS/i.test(fulfilment.shipping.code) ? 'Express Post' : 'Standard Post';
+      return responseJson(req, {
+        error: `${disabledService} is currently unavailable — please calculate shipping again.`,
+      }, 400);
+    }
 
     // Re-derive the maximum parcel size from the saved products. The storefront
     // filters oversized PAC services too, but a crafted client must not be able

@@ -18,7 +18,7 @@ Badges, points, chips, streaks, tips and similar features are for entertainment 
 
 [Merchandise, pricing and payment]
 Store prices and charges are displayed in Australian dollars. The checkout shows the merchandise total, applicable GST, card fee, discount and shipping before payment. Payment is processed by Stripe. An order is accepted after successful payment and confirmation, subject to stock and fraud checks. If we cannot supply an item, we will offer an appropriate refund or other remedy.
-Australian delivery is $15 per order, with free standard delivery when the merchandise subtotal is at least $150, unless a clearly disclosed promotion or collection option applies. Delivery dates are estimates. You are responsible for providing a complete and accurate delivery address.
+Australian delivery is charged at the fixed rate displayed in the cart or at the current Australia Post service rate calculated for the delivery postcode, depending on the shipping mode shown at checkout. Standard delivery is free when the merchandise subtotal is at least $150, unless a clearly disclosed promotion or collection option applies. Delivery dates are estimates. You are responsible for providing a complete and accurate delivery address.
 
 [Returns and Australian Consumer Law]
 For change-of-mind returns, contact support@rugbyleaguetakeover.com within 30 days after delivery. Items must be unworn, unused and in resalable condition with original packaging where reasonably possible. Original delivery charges and return postage are not refundable for change of mind unless we agree otherwise.

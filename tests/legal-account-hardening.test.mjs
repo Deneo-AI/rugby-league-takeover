@@ -32,7 +32,8 @@ test("public legal fallbacks are substantive and contain no placeholder warning"
   assert.match(privacy, /Supabase/);
   assert.match(privacy, /Stripe/);
   assert.match(terms, /Australian Consumer Law/);
-  assert.match(terms, /Australian delivery is \$15 per order/);
+  assert.match(terms, /fixed rate displayed in the cart/);
+  assert.match(terms, /Australia Post service rate/);
   assert.match(terms, /no cash value/);
 });
 

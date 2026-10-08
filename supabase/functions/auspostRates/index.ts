@@ -10,7 +10,7 @@
 // Flow: GET .../parcel/domestic/service.json to discover which services are
 // available for this parcel (weight/dims/postcodes), then GET
 // .../parcel/domestic/calculate.json per service code to get its price + ETA.
-import { json, preflight, serviceClient } from './shared.ts';
+import { json, preflight, resolveClientIp, serviceClient } from './shared.ts';
 
 const PAC_BASE = 'https://digitalapi.auspost.com.au/postage/parcel/domestic';
 const DEFAULT_SATCHEL_CM = { length: 35, width: 25, height: 2 }; // small satchel fallback
@@ -18,6 +18,40 @@ const DEFAULT_SATCHEL_CM = { length: 35, width: 25, height: 2 }; // small satche
 // overcharges multi-item orders — products missing a weight are logged and
 // flagged in the admin rather than left to quietly distort quotes.
 const ASSUMED_ITEM_WEIGHT_G = 300;
+const MAX_REQUEST_BYTES = 16 * 1024;
+const MAX_CART_LINES = 20;
+const MAX_ITEM_QUANTITY = 20;
+const MAX_CART_UNITS = 100;
+const PAC_RATE_LIMIT = 30;
+const PAC_RATE_WINDOW_SECONDS = 600;
+const PAC_FETCH_TIMEOUT_MS = 10_000;
+
+async function readJsonBody(req: Request) {
+  const declared = Number(req.headers.get("content-length") || 0);
+  if (declared > MAX_REQUEST_BYTES) throw new Error("REQUEST_TOO_LARGE");
+  const raw = await req.text();
+  if (!raw || new TextEncoder().encode(raw).byteLength > MAX_REQUEST_BYTES) {
+    throw new Error(raw ? "REQUEST_TOO_LARGE" : "INVALID_JSON");
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error("INVALID_JSON");
+  }
+}
+
+async function sha256(value: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+// deno-lint-ignore no-explicit-any
+function serviceEnabled(service: any, settings: any) {
+  const express = /EXPRESS/i.test(`${service?.code ?? ""} ${service?.name ?? ""}`);
+  return express
+    ? settings?.shipping_express_enabled !== false
+    : settings?.shipping_standard_enabled !== false;
+}
 
 const isPostcode = (value: unknown) => /^\d{4}$/.test(String(value || '').trim());
 
@@ -105,9 +139,10 @@ function authHeaders() {
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return preflight();
+  if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
   try {
     const svc = serviceClient();
-    const { toPostcode, cart } = await req.json().catch(() => ({}));
+    const { toPostcode, cart } = await readJsonBody(req);
     const destination = String(toPostcode || '').trim();
 
     if (!isPostcode(destination)) {
@@ -116,42 +151,76 @@ Deno.serve(async (req) => {
     if (!Array.isArray(cart) || cart.length === 0) {
       return json({ error: 'Cart is empty' }, 400);
     }
+    if (cart.length > MAX_CART_LINES) {
+      return json({ error: 'Cart contains too many items' }, 400);
+    }
+    const normalizedCart: { productId: string; quantity: number }[] = [];
+    let totalUnits = 0;
+    for (const rawItem of cart) {
+      const productId = String(rawItem?.productId || '').trim();
+      const quantity = Number(rawItem?.quantity);
+      if (!productId || productId.length > 128 || !Number.isInteger(quantity) || quantity < 1 || quantity > MAX_ITEM_QUANTITY) {
+        return json({ error: 'Cart contains an invalid item' }, 400);
+      }
+      totalUnits += quantity;
+      if (totalUnits > MAX_CART_UNITS) return json({ error: 'Cart quantity is too large' }, 400);
+      normalizedCart.push({ productId, quantity });
+    }
 
-    const { data: settings } = await svc.from('site_settings').select('shipping_sender_postcode').limit(1).maybeSingle();
+    const clientKey = resolveClientIp(req) || req.headers.get('user-agent') || 'unknown';
+    const { data: throttle, error: throttleError } = await svc.rpc('claim_checkout_attempt', {
+      p_key_hash: await sha256(`pac|${clientKey}`),
+      p_limit: PAC_RATE_LIMIT,
+      p_window_seconds: PAC_RATE_WINDOW_SECONDS,
+    }).single();
+    if (throttleError) throw throttleError;
+    if (!(throttle as { allowed?: boolean } | null)?.allowed) {
+      return json({ error: 'Too many shipping calculations. Please wait a few minutes and try again.' }, 429);
+    }
+
+    const { data: settings, error: settingsError } = await svc
+      .from('site_settings')
+      .select('shipping_sender_postcode,shipping_standard_enabled,shipping_express_enabled')
+      .limit(1)
+      .maybeSingle();
+    if (settingsError) throw settingsError;
     const origin = String(settings?.shipping_sender_postcode || '').trim();
     if (!isPostcode(origin)) {
       return json({ error: 'Shipping is not configured yet — set a sender postcode in Site Settings' }, 503);
     }
+    if (settings?.shipping_standard_enabled === false && settings?.shipping_express_enabled === false) {
+      return json({ error: 'Australian delivery is temporarily unavailable' }, 503);
+    }
 
     // Everything goes in ONE parcel: weights add up, the footprint is the
     // largest single item (whatever satchel or box the order fits in).
-    // Non-shippable items (memberships, anything digital) are skipped entirely
-    // so they neither add weight nor force a postage charge.
+    // Products are fetched in one bounded query so a public caller cannot force
+    // one database round-trip per line item.
+    const productIds = [...new Set(normalizedCart.map((item) => item.productId))];
+    const { data: products, error: productsError } = await svc
+      .from('products')
+      .select('id,name,weight_grams,length_cm,width_cm,height_cm,parcel_size,shipping_required')
+      .in('id', productIds);
+    if (productsError) throw productsError;
+    const productsById = new Map((products || []).map((product) => [product.id, product]));
+    if (productIds.some((id) => !productsById.has(id))) {
+      return json({ error: 'Cart contains an unavailable item' }, 400);
+    }
+
     let totalGrams = 0;
     let length = 0, width = 0, height = 0;
     let requiredSize = DEFAULT_PARCEL_SIZE;
     let shippableUnits = 0;
     const missingWeight: string[] = [];
-    for (const item of cart) {
-      const productId = String(item?.productId || '').trim();
-      const quantity = Math.max(1, Math.floor(Number(item?.quantity) || 1));
-      if (!productId) continue;
-      const { data: product } = await svc
-        .from('products')
-        .select('name, weight_grams, length_cm, width_cm, height_cm, parcel_size, shipping_required')
-        .eq('id', productId)
-        .maybeSingle();
-      if (!product) continue;
-      if (product.shipping_required === false) continue;
+    for (const item of normalizedCart) {
+      const product = productsById.get(item.productId);
+      if (!product || product.shipping_required === false) continue;
+      const quantity = item.quantity;
 
       shippableUnits += quantity;
-      // A missing weight used to become 300g per unit silently, which is how two
-      // ~40g stubbie coolers declared 600g and crossed AusPost's 500g bracket.
-      // The assumption is still made (checkout must not hard-fail on a config
-      // gap) but it is now recorded and surfaced instead of hidden.
       const grams = Number(product.weight_grams);
       if (!Number.isFinite(grams) || grams <= 0) {
-        missingWeight.push(String(product.name || productId));
+        missingWeight.push(String(product.name || item.productId));
         totalGrams += ASSUMED_ITEM_WEIGHT_G * quantity;
       } else {
         totalGrams += grams * quantity;
@@ -180,7 +249,7 @@ Deno.serve(async (req) => {
     const dimParams = `&length=${length}&width=${width}&height=${height}&weight=${weightKg.toFixed(2)}`;
     const serviceUrl = `${PAC_BASE}/service.json?from_postcode=${origin}&to_postcode=${destination}${dimParams}`;
 
-    const serviceRes = await fetch(serviceUrl, { headers: authHeaders() });
+    const serviceRes = await fetch(serviceUrl, { headers: authHeaders(), signal: AbortSignal.timeout(PAC_FETCH_TIMEOUT_MS) });
     if (!serviceRes.ok) {
       const body = await serviceRes.text().catch(() => '');
       console.error('AusPost service.json error:', serviceRes.status, body);
@@ -193,13 +262,14 @@ Deno.serve(async (req) => {
 
     // Filter BEFORE pricing: each surviving service costs one calculate.json
     // round-trip, so dropping the oversized ones here also cuts the request count.
-    const availableServices = allowedServices(allServices, requiredSize);
+    const availableServices = allowedServices(allServices, requiredSize)
+      .filter((service) => serviceEnabled(service, settings));
 
     if (!availableServices.length) {
       return json({ ok: true, services: [], parcelSize: requiredSize });
     }
 
-    const cartHash = cartFingerprint(cart);
+    const cartHash = cartFingerprint(normalizedCart);
     const expiresAt = Date.now() + QUOTE_TTL_MS;
 
     const rated = [];
@@ -208,7 +278,7 @@ Deno.serve(async (req) => {
       if (!code) continue;
       try {
         const calcUrl = `${PAC_BASE}/calculate.json?from_postcode=${origin}&to_postcode=${destination}${dimParams}&service_code=${encodeURIComponent(code)}`;
-        const calcRes = await fetch(calcUrl, { headers: authHeaders() });
+        const calcRes = await fetch(calcUrl, { headers: authHeaders(), signal: AbortSignal.timeout(PAC_FETCH_TIMEOUT_MS) });
         if (!calcRes.ok) continue;
         const calcData = await calcRes.json();
         const result = calcData?.postage_result;
@@ -231,7 +301,10 @@ Deno.serve(async (req) => {
     rated.sort((a, b) => a.price_aud - b.price_aud);
     return json({ ok: true, services: rated, parcelSize: requiredSize });
   } catch (error) {
+    const message = (error as Error)?.message || '';
+    if (message === 'REQUEST_TOO_LARGE') return json({ error: 'Request is too large' }, 413);
+    if (message === 'INVALID_JSON') return json({ error: 'Invalid request body' }, 400);
     console.error('auspostRates error:', error);
-    return json({ error: (error as Error).message }, 500);
+    return json({ error: 'Shipping rates are temporarily unavailable. Please try again.' }, 500);
   }
 });

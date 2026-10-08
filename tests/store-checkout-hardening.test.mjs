@@ -71,6 +71,24 @@ test("store requires a fresh PAC selection only for physical shipped carts in ca
   assert.ok(!store.includes("$15 flat-rate"));
 });
 
+test("fixed and PAC modes remain selectable while PAC services can be toggled independently", () => {
+  const settings = readFileSync(new URL("../src/components/admin/SiteSettingsManager.jsx", import.meta.url), "utf8");
+  const rates = readFileSync(new URL("../supabase/functions/auspostRates/index.ts", import.meta.url), "utf8");
+  const checkout = readFileSync(new URL("../supabase/functions/createCheckout/index.ts", import.meta.url), "utf8");
+
+  assert.ok(settings.includes('value="fixed"'));
+  assert.ok(settings.includes('value="calculated"'));
+  assert.ok(settings.includes("shipping_standard_enabled"));
+  assert.ok(settings.includes("shipping_express_enabled"));
+  assert.ok(settings.includes("Both PAC services are off"));
+  assert.ok(rates.includes("shipping_standard_enabled"));
+  assert.ok(rates.includes("shipping_express_enabled"));
+  assert.ok(rates.includes("serviceEnabled"));
+  assert.ok(checkout.includes("shippingServiceEnabled"));
+  assert.ok(checkout.includes("is currently unavailable"));
+  assert.ok(!settings.includes("Checkout charges $15 nationwide"));
+});
+
 test("PAC restoration preserves hardened checkout, promos and verified returns", () => {
   const store = readFileSync(new URL("../src/pages/Store.jsx", import.meta.url), "utf8");
   for (const token of [

@@ -67,6 +67,8 @@ const defaults = {
   shipping_mode: "calculated",
   shipping_flat_single_aud: 12.5,
   shipping_flat_multi_aud: 15.9,
+  shipping_standard_enabled: true,
+  shipping_express_enabled: true,
   gst_enabled: true,
   gst_rate_percent: 6.5,
   gst_mode: "added",
@@ -250,9 +252,9 @@ export default function SiteSettingsManager({ settings }) {
     {
       id: "shipping",
       title: "Shipping & Collection",
-      desc: "Manual fulfilment details and the optional Las Vegas collection route.",
+      desc: "Choose live AusPost PAC or fixed rates, control services, sender details, free shipping, and collection.",
       icon: Truck,
-      summary: "$15 AU · Free from $150",
+      summary: `${draft.shipping_mode === "fixed" ? "Fixed rates" : "PAC rates"} · Free from ${Number(draft.free_shipping_threshold_aud ?? 150)}`,
     },
     {
       id: "footer",
@@ -652,11 +654,11 @@ export default function SiteSettingsManager({ settings }) {
                       <div className="border-b border-border/30 pb-2 mb-2">
                         <h3 className="font-display text-lg uppercase text-primary">Shipping &amp; Collection</h3>
                         <p className="text-[10px] text-muted-foreground">
-                          Store checkout charges $15 Australia-wide and becomes free from a $150 merchandise subtotal. Carrier postage is purchased separately; no carrier API is called.
+                          {`${draft.shipping_mode === "fixed" ? "Fixed Australia-wide postage" : "Live Australia Post PAC quotes"} with free shipping from ${Number(draft.free_shipping_threshold_aud ?? 150)} AUD of merchandise.`}
                         </p>
                       </div>
                       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                        <LabeledField label="Sender name" help="Kept as a manual return-address reference.">
+                        <LabeledField label="Sender name" help="Used on packing slips and as the return-address contact.">
                           <Input placeholder="e.g. Dene Palmer" value={draft.shipping_sender_name || ""} onChange={(e) => update("shipping_sender_name", e.target.value)} />
                         </LabeledField>
                         <LabeledField label="Business name (optional)">
@@ -676,14 +678,17 @@ export default function SiteSettingsManager({ settings }) {
                         <LabeledField label="State">
                           <Input placeholder="e.g. QLD" value={draft.shipping_sender_state || ""} onChange={(e) => update("shipping_sender_state", e.target.value)} />
                         </LabeledField>
-                        <LabeledField label="Postcode" help="Manual return-address reference.">
+                        <LabeledField label="Postcode" help="Origin postcode sent to Australia Post PAC when calculated pricing is active.">
                           <Input placeholder="e.g. 4000" inputMode="numeric" maxLength={4} value={draft.shipping_sender_postcode || ""} onChange={(e) => update("shipping_sender_postcode", e.target.value.replace(/\D/g, "").slice(0, 4))} />
                         </LabeledField>
                       </div>
                       <div className="flex items-start gap-2 border border-amber-500/25 bg-amber-500/5 p-3">
                         <Truck className="h-3.5 w-3.5 text-amber-400 shrink-0 mt-0.5" />
                         <p className="text-[10px] leading-relaxed text-slate-300">
-                          The store does not calculate carrier rates or buy postage. Use the Orders screen to print an address/packing slip, purchase postage separately, then enter the carrier and tracking details.
+                          {draft.shipping_mode === "fixed"
+                            ? "Checkout charges the saved fixed rate and does not call PAC."
+                            : "PAC calculates current customer rates and returns only the enabled services below."}{" "}
+                          Labels are not purchased automatically: print the order address/packing slip, buy the matching Australia Post label, then save the tracking number.
                         </p>
                       </div>
 
@@ -757,6 +762,35 @@ export default function SiteSettingsManager({ settings }) {
                             <option value="fixed">Fixed — flat rate</option>
                           </select>
                         </LabeledField>
+                        {draft.shipping_mode !== "fixed" && (
+                          <div className="grid grid-cols-1 gap-3 border border-border/40 bg-muted/5 p-3 sm:grid-cols-2">
+                            <div className="flex items-start justify-between gap-3 border border-border/30 bg-background/30 p-3">
+                              <div>
+                                <p className="text-[10px] font-bold uppercase tracking-wider text-foreground">Standard Post</p>
+                                <p className="mt-1 text-[9px] leading-relaxed text-muted-foreground">Offer standard Parcel Post services returned by PAC.</p>
+                              </div>
+                              <Switch
+                                checked={draft.shipping_standard_enabled !== false}
+                                onCheckedChange={(v) => update("shipping_standard_enabled", v)}
+                              />
+                            </div>
+                            <div className="flex items-start justify-between gap-3 border border-border/30 bg-background/30 p-3">
+                              <div>
+                                <p className="text-[10px] font-bold uppercase tracking-wider text-foreground">Express Post</p>
+                                <p className="mt-1 text-[9px] leading-relaxed text-muted-foreground">Offer Express Post services returned by PAC.</p>
+                              </div>
+                              <Switch
+                                checked={draft.shipping_express_enabled !== false}
+                                onCheckedChange={(v) => update("shipping_express_enabled", v)}
+                              />
+                            </div>
+                            {draft.shipping_standard_enabled === false && draft.shipping_express_enabled === false && (
+                              <p className="text-[10px] font-medium text-amber-400 sm:col-span-2">
+                                Both PAC services are off. Australian delivery checkout will pause until at least one is enabled.
+                              </p>
+                            )}
+                          </div>
+                        )}
                         {draft.shipping_mode === "fixed" && (
                           <div className="grid grid-cols-1 gap-3 border border-border/40 bg-muted/5 p-3 sm:grid-cols-2">
                             <LabeledField label="Flat rate — 1 item (AUD)" help="Charged when the cart has a single shippable item.">
